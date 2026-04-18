@@ -19,11 +19,20 @@ pub struct AppConfig {
     pub confirm_delete_segment: bool,
     #[serde(default)]
     pub shortcuts: HashMap<String, String>,
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
+    #[serde(default = "default_whisper_language")]
+    pub whisper_language: String,
+    #[serde(default = "default_transcribe_kinds")]
+    pub transcribe_segment_kinds: Vec<String>,
 }
 
 fn default_threshold() -> f64 { 0.7 }
 fn default_export_format() -> String { "clean_mp3".to_string() }
 fn default_confirm_delete() -> bool { true }
+fn default_whisper_model() -> String { "base".to_string() }
+fn default_whisper_language() -> String { "sv".to_string() }
+fn default_transcribe_kinds() -> Vec<String> { vec!["chapter".to_string()] }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -35,6 +44,9 @@ impl Default for AppConfig {
             export_loudness_normalize: false,
             confirm_delete_segment: true,
             shortcuts: HashMap::new(),
+            whisper_model: "base".to_string(),
+            whisper_language: "sv".to_string(),
+            transcribe_segment_kinds: vec!["chapter".to_string()],
         }
     }
 }

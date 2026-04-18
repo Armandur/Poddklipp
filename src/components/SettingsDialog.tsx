@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { SegmentKindsHook } from "../hooks/useSegmentKinds";
-import { useAppConfig } from "../hooks/useAppConfig";
+import { AppConfigHook } from "../hooks/useAppConfig";
 import AnalysisSection from "./settings/AnalysisSection";
 import BehaviorSection from "./settings/BehaviorSection";
 import ExportSection from "./settings/ExportSection";
@@ -10,6 +10,7 @@ import StorageSection from "./settings/StorageSection";
 
 interface SettingsDialogProps {
   kinds: SegmentKindsHook;
+  appConfig: AppConfigHook;
   onClose: () => void;
 }
 
@@ -29,9 +30,8 @@ const SECTIONS: Section[] = [
   { id: "storage",       label: "Lagring" },
 ];
 
-export default function SettingsDialog({ kinds, onClose }: SettingsDialogProps) {
+export default function SettingsDialog({ kinds, appConfig, onClose }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SectionId>("segment-kinds");
-  const appConfig = useAppConfig();
 
   return (
     <div className="export-dialog-overlay" onClick={onClose}>
@@ -59,7 +59,7 @@ export default function SettingsDialog({ kinds, onClose }: SettingsDialogProps) 
           </div>
 
           <div className="settings-body">
-            {activeSection === "segment-kinds" && <SegmentKindSection kinds={kinds} />}
+            {activeSection === "segment-kinds" && <SegmentKindSection kinds={kinds} appConfig={appConfig} />}
             {activeSection === "analysis"      && <AnalysisSection appConfig={appConfig} />}
             {activeSection === "export"        && <ExportSection appConfig={appConfig} />}
             {activeSection === "shortcuts"     && <ShortcutsSection appConfig={appConfig} />}

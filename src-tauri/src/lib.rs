@@ -77,6 +77,7 @@ pub fn run() {
             commands::segments::update_segment,
             commands::segments::split_segment_at,
             commands::segments::delete_segment,
+            commands::segments::transcribe_segment,
             commands::export::export_episode,
             commands::settings::list_segment_kinds,
             commands::settings::update_segment_kind,

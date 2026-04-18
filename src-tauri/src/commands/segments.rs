@@ -1,11 +1,12 @@
 //! Segment-hantering: auto-generera från detektioner + CRUD för manuell
 //! redigering (namnge, toggla excluderad, dra-justera gränser i timeline).
 
-use crate::AppState;
+use crate::{AppState, sidecar::Sidecar};
 use rusqlite::{Connection, params};
 use serde::Serialize;
+use serde_json::json;
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Debug, Serialize)]
 pub struct Segment {
@@ -17,7 +18,26 @@ pub struct Segment {
     pub kind: String,
     pub excluded: bool,
     pub sort_order: i64,
+    pub transcription: Option<String>,
 }
+
+fn row_to_segment(r: &rusqlite::Row) -> rusqlite::Result<Segment> {
+    Ok(Segment {
+        id: r.get(0)?,
+        episode_id: r.get(1)?,
+        start_ms: r.get(2)?,
+        end_ms: r.get(3)?,
+        label: r.get(4)?,
+        kind: r.get(5)?,
+        excluded: r.get::<_, i64>(6)? != 0,
+        sort_order: r.get(7)?,
+        transcription: r.get(8)?,
+    })
+}
+
+const SELECT_SEGMENT: &str =
+    "SELECT id, episode_id, start_ms, end_ms, label, kind, excluded, sort_order, transcription
+     FROM segments";
 
 /// Regenerera segment för ett avsnitt från dess detektioner.
 /// Raderar befintliga segment — manuella justeringar går alltså förlorade.
@@ -199,25 +219,11 @@ pub fn list_segments(
 ) -> Result<Vec<Segment>, String> {
     let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
     let mut stmt = conn
-        .prepare(
-            "SELECT id, episode_id, start_ms, end_ms, label, kind, excluded, sort_order
-             FROM segments WHERE episode_id = ?1 ORDER BY sort_order",
-        )
+        .prepare(&format!("{SELECT_SEGMENT} WHERE episode_id = ?1 ORDER BY sort_order"))
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map(params![episode_id], |r| {
-            Ok(Segment {
-                id: r.get(0)?,
-                episode_id: r.get(1)?,
-                start_ms: r.get(2)?,
-                end_ms: r.get(3)?,
-                label: r.get(4)?,
-                kind: r.get(5)?,
-                excluded: r.get::<_, i64>(6)? != 0,
-                sort_order: r.get(7)?,
-            })
-        })
+        .query_map(params![episode_id], row_to_segment)
         .map_err(|e| e.to_string())?;
 
     let result: Result<Vec<_>, _> = rows.collect();
@@ -271,21 +277,9 @@ pub fn update_segment(
 
     let seg = conn
         .query_row(
-            "SELECT id, episode_id, start_ms, end_ms, label, kind, excluded, sort_order
-             FROM segments WHERE id = ?1",
+            &format!("{SELECT_SEGMENT} WHERE id = ?1"),
             params![id],
-            |r| {
-                Ok(Segment {
-                    id: r.get(0)?,
-                    episode_id: r.get(1)?,
-                    start_ms: r.get(2)?,
-                    end_ms: r.get(3)?,
-                    label: r.get(4)?,
-                    kind: r.get(5)?,
-                    excluded: r.get::<_, i64>(6)? != 0,
-                    sort_order: r.get(7)?,
-                })
-            },
+            row_to_segment,
         )
         .map_err(|e| e.to_string())?;
 
@@ -374,5 +368,92 @@ pub fn delete_segment(state: State<AppState>, id: i64) -> Result<(), String> {
     let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
     conn.execute("DELETE FROM segments WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Transkribera 15–30 s från segmentets start med Whisper.
+/// Returnerar direkt — resultatet levereras via `transcription-done` / `transcription-error`.
+#[tauri::command]
+pub fn transcribe_segment(
+    app: AppHandle,
+    state: State<AppState>,
+    segment_id: i64,
+    duration_ms: Option<i64>,
+) -> Result<(), String> {
+    let (episode_path, offset_ms, whisper_model, language) = {
+        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+        let (path, start): (String, i64) = conn
+            .query_row(
+                "SELECT e.source_path, s.start_ms
+                 FROM segments s JOIN episodes e ON e.id = s.episode_id
+                 WHERE s.id = ?1",
+                params![segment_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| format!("segment hittades inte: {e}"))?;
+        let (model, language) = state
+            .config
+            .lock()
+            .map(|c| (c.whisper_model.clone(), c.whisper_language.clone()))
+            .unwrap_or_else(|_| ("base".to_string(), "sv".to_string()));
+        (path, start, model, language)
+    };
+
+    let dur = duration_ms.unwrap_or(15_000);
+    let app_clone = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_clone.state::<AppState>();
+
+        let result: Result<String, String> = (|| {
+            let mut guard = state.sidecar.lock().map_err(|_| "sidecar-lås".to_string())?;
+            if guard.is_none() {
+                *guard = Some(Sidecar::spawn().map_err(|e| e.to_string())?);
+            }
+            let sidecar = guard.as_mut().unwrap();
+            let val = sidecar
+                .call(
+                    "transcribe",
+                    json!({
+                        "episode_path": episode_path,
+                        "offset_ms": offset_ms,
+                        "duration_ms": dur,
+                        "model": whisper_model,
+                        "language": language,
+                    }),
+                    &|progress: f64, stage: &str| {
+                        let _ = app_clone.emit(
+                            "transcription-progress",
+                            json!({ "segment_id": segment_id, "progress": progress, "stage": stage }),
+                        );
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(val["text"].as_str().unwrap_or("").to_string())
+        })();
+
+        match result {
+            Ok(text) => {
+                {
+                    let conn = state.db.lock().unwrap();
+                    let _ = conn.execute(
+                        "UPDATE segments SET transcription = ?1 WHERE id = ?2",
+                        params![text, segment_id],
+                    );
+                }
+                let _ = app_clone.emit(
+                    "transcription-done",
+                    json!({ "segment_id": segment_id, "text": text }),
+                );
+            }
+            Err(e) => {
+                let _ = app_clone.emit(
+                    "transcription-error",
+                    json!({ "segment_id": segment_id, "error": e }),
+                );
+            }
+        }
+    });
+
     Ok(())
 }

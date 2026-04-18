@@ -2,12 +2,15 @@ import { useState } from "react";
 import { SEGMENT_KIND_COLORS } from "../../lib/format";
 import { SegmentKind } from "../../lib/tauri";
 import { SegmentKindsHook } from "../../hooks/useSegmentKinds";
+import { AppConfigHook } from "../../hooks/useAppConfig";
 
 interface Props {
   kinds: SegmentKindsHook;
+  appConfig: AppConfigHook;
 }
 
-export default function SegmentKindSection({ kinds }: Props) {
+export default function SegmentKindSection({ kinds, appConfig }: Props) {
+  const { config, update } = appConfig;
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [saving, setSaving] = useState(false);
@@ -51,6 +54,7 @@ export default function SegmentKindSection({ kinds }: Props) {
             <th>Typ</th>
             <th>Namn</th>
             <th style={{ textAlign: "center", width: "9rem" }}>Exkl. standard</th>
+            <th style={{ textAlign: "center", width: "7rem" }}>Transkribera</th>
           </tr>
         </thead>
         <tbody>
@@ -95,6 +99,19 @@ export default function SegmentKindSection({ kinds }: Props) {
                     onChange={() =>
                       toggleExcluded(k.slug as SegmentKind, k.label, k.default_excluded)
                     }
+                  />
+                </td>
+                <td style={{ textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.transcribe_segment_kinds.includes(k.slug)}
+                    onChange={() => {
+                      const included = config.transcribe_segment_kinds.includes(k.slug);
+                      const next = included
+                        ? config.transcribe_segment_kinds.filter((s) => s !== k.slug)
+                        : [...config.transcribe_segment_kinds, k.slug];
+                      update({ transcribe_segment_kinds: next });
+                    }}
                   />
                 </td>
               </tr>

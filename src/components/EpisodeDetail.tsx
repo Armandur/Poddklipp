@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   analyzeEpisode,
   computeWaveform,
@@ -13,7 +14,7 @@ import {
 } from "../lib/tauri";
 import { AnalysisJob } from "../hooks/useAnalysisJobs";
 import { SegmentKindsHook } from "../hooks/useSegmentKinds";
-import { useAppConfig } from "../hooks/useAppConfig";
+import { AppConfigHook } from "../hooks/useAppConfig";
 import { matchShortcut } from "../lib/shortcuts";
 import { JINGLE_KIND_LABELS } from "../lib/format";
 import Timeline, { TimelineApi } from "./Timeline";
@@ -26,6 +27,7 @@ interface EpisodeDetailProps {
   job: AnalysisJob | null;
   completionTick: number;
   segmentKinds: SegmentKindsHook;
+  appConfig: AppConfigHook;
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -41,6 +43,7 @@ export default function EpisodeDetail({
   job,
   completionTick,
   segmentKinds,
+  appConfig,
 }: EpisodeDetailProps) {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -54,7 +57,7 @@ export default function EpisodeDetail({
   const timelineApi = useRef<TimelineApi | null>(null);
   const suppressTimeUpdateUntil = useRef<number>(0);
   const currentMsRef = useRef<number>(0);
-  const { shortcuts, config: appConfig } = useAppConfig();
+  const { shortcuts, config: appConfigValues } = appConfig;
 
   const analyzing = job?.state === "running";
   const analyzedAt = episode.analyzed_at;
@@ -77,6 +80,25 @@ export default function EpisodeDetail({
       cancelled = true;
     };
   }, [episode.id, completionTick]);
+
+  // Lyssna på transkriberings-events och uppdatera segment-state.
+  useEffect(() => {
+    const unsubs = [
+      listen<{ segment_id: number; text: string }>("transcription-done", (e) => {
+        setSegments((prev) =>
+          prev.map((s) =>
+            s.id === e.payload.segment_id ? { ...s, transcription: e.payload.text } : s,
+          ),
+        );
+      }),
+      listen<{ segment_id: number; error: string }>("transcription-error", (e) => {
+        setError(`Transkribering misslyckades för segment ${e.payload.segment_id}: ${e.payload.error}`);
+      }),
+    ];
+    return () => {
+      unsubs.forEach((p) => p.then((u) => u()));
+    };
+  }, []);
 
   // Beräkna vågform automatiskt när avsnittet saknar den.
   useEffect(() => {
@@ -164,9 +186,12 @@ export default function EpisodeDetail({
   function seek(ms: number, segmentId?: number) {
     const api = timelineApi.current;
     if (!api) return;
+    if (segmentId != null) {
+      suppressTimeUpdateUntil.current = Date.now() + 300;
+      setActiveSegmentId(segmentId);
+    }
     api.seekMs(ms);
     if (!api.isPlaying()) api.play();
-    if (segmentId != null) setActiveSegmentId(segmentId);
   }
 
   function handleTimeUpdate(ms: number) {
@@ -243,60 +268,6 @@ export default function EpisodeDetail({
     <section className="card">
       <header className="card-header">
         <h2>{episode.display_name}</h2>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          {segments.length > 0 && (
-            <button
-              className="secondary"
-              onClick={() => setShowExport(true)}
-              disabled={analyzing || fileMissing}
-            >
-              Exportera
-            </button>
-          )}
-          {hasWaveform && (
-            <button
-              className="secondary"
-              onClick={splitHere}
-              disabled={analyzing}
-              title="Dela segment vid nuvarande spelposition (S)"
-            >
-              Dela här
-            </button>
-          )}
-          {hasWaveform && (
-            <button
-              className={captureMode ? "danger" : "secondary"}
-              onClick={() => setCaptureMode((v) => !v)}
-              disabled={analyzing}
-              title="Dra i tidslinjen för att markera ett ljud som ny jingel"
-            >
-              {captureMode ? "Avbryt markering" : "Lär in jingel…"}
-            </button>
-          )}
-          {segments.some((s) => s.kind === "chapter") && (
-            <button
-              className="secondary"
-              onClick={renumberChapters}
-              disabled={analyzing}
-              title="Numrera om alla kapitel i ordning (Kapitel 1, 2, 3…)"
-            >
-              Numrera om kapitel
-            </button>
-          )}
-          {analyzedAt && (
-            <button
-              className="secondary"
-              onClick={regenerate}
-              disabled={analyzing}
-              title="Bygg om segment från detektionerna (raderar manuella justeringar)"
-            >
-              Regenerera segment
-            </button>
-          )}
-          <button onClick={runAnalysis} disabled={analyzing || fileMissing}>
-            {analyzing ? "Analyserar…" : "Analysera"}
-          </button>
-        </div>
       </header>
 
       {analyzing && job && (
@@ -330,6 +301,7 @@ export default function EpisodeDetail({
       {error && <div className="error">Fel: {error}</div>}
 
       {hasWaveform && (
+        <>
         <Timeline
           episode={episode}
           detections={detections}
@@ -345,6 +317,65 @@ export default function EpisodeDetail({
           onReady={(api) => { timelineApi.current = api; }}
           onTimeUpdate={handleTimeUpdate}
         />
+        <div className="episode-actions">
+          {segments.length > 0 && (
+            <button
+              className="secondary"
+              onClick={() => setShowExport(true)}
+              disabled={analyzing || fileMissing}
+            >
+              Exportera
+            </button>
+          )}
+          <button
+            className="secondary"
+            onClick={splitHere}
+            disabled={analyzing}
+            title="Dela segment vid nuvarande spelposition (S)"
+          >
+            Dela här
+          </button>
+          <button
+            className={captureMode ? "danger" : "secondary"}
+            onClick={() => setCaptureMode((v) => !v)}
+            disabled={analyzing}
+            title="Dra i tidslinjen för att markera ett ljud som ny jingel"
+          >
+            {captureMode ? "Avbryt markering" : "Lär in jingel…"}
+          </button>
+          {segments.some((s) => s.kind === "chapter") && (
+            <button
+              className="secondary"
+              onClick={renumberChapters}
+              disabled={analyzing}
+              title="Numrera om alla kapitel i ordning (Kapitel 1, 2, 3…)"
+            >
+              Numrera om kapitel
+            </button>
+          )}
+          {analyzedAt && (
+            <button
+              className="secondary"
+              onClick={regenerate}
+              disabled={analyzing}
+              title="Bygg om segment från detektionerna (raderar manuella justeringar)"
+            >
+              Regenerera segment
+            </button>
+          )}
+          <button onClick={runAnalysis} disabled={analyzing || fileMissing}>
+            {analyzing ? "Analyserar…" : "Analysera"}
+          </button>
+        </div>
+        </>
+      )}
+
+      {!hasWaveform && (
+        <div className="episode-actions">
+          <button onClick={runAnalysis} disabled={analyzing || fileMissing}>
+            {analyzing ? "Analyserar…" : "Analysera"}
+          </button>
+        </div>
       )}
 
       <div className="detection-summary">
@@ -374,8 +405,9 @@ export default function EpisodeDetail({
         editingSegmentId={editingSegmentId}
         onEditingDone={() => setEditingSegmentId(null)}
         segmentKinds={segmentKinds}
-        confirmDelete={appConfig.confirm_delete_segment}
+        confirmDelete={appConfigValues.confirm_delete_segment}
         shortcuts={shortcuts}
+        transcribeKinds={appConfigValues.transcribe_segment_kinds}
       />
 
       {showExport && (

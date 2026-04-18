@@ -68,6 +68,20 @@ def handle(method: str, params: dict) -> dict:
         _progress(1.0, "klar")
         return {"detections": detections}
 
+    if method == "transcribe":
+        from .transcribe import transcribe_clip, model_needs_download
+        model_name = params.get("model", "base")
+        if model_needs_download(model_name):
+            _progress(0.0, f"Laddar ned Whisper-modell ({model_name}), kan ta en stund…")
+        text = transcribe_clip(
+            episode_path=params["episode_path"],
+            offset_ms=params["offset_ms"],
+            duration_ms=params.get("duration_ms", 15_000),
+            model_name=model_name,
+            language=params.get("language", "sv"),
+        )
+        return {"text": text}
+
     raise ValueError(f"okänd metod: {method!r}")
 
 

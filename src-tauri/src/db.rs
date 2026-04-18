@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::{Connection, params};
 use std::path::Path;
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 pub fn init_db(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
@@ -31,6 +31,9 @@ pub fn init_db(db_path: &Path) -> Result<Connection> {
     }
     if current_version < 4 {
         apply_migration_v4(&conn)?;
+    }
+    if current_version < 5 {
+        apply_migration_v5(&conn)?;
     }
 
     if fresh {
@@ -119,6 +122,11 @@ fn apply_migration_v3(conn: &Connection) -> Result<()> {
         ALTER TABLE episodes ADD COLUMN file_missing INTEGER NOT NULL DEFAULT 0;
         "#,
     )?;
+    Ok(())
+}
+
+fn apply_migration_v5(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE segments ADD COLUMN transcription TEXT;")?;
     Ok(())
 }
 

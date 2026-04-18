@@ -1,11 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import BatchExportDialog from "./components/BatchExportDialog";
+import TranscriptionToast from "./components/TranscriptionToast";
 import EpisodeDetail from "./components/EpisodeDetail";
 import EpisodeList from "./components/EpisodeList";
 import JingleLibrary from "./components/JingleLibrary";
 import SegmentKindSettings from "./components/SegmentKindSettings";
 import { useAnalysisJobs } from "./hooks/useAnalysisJobs";
+import { useAppConfig } from "./hooks/useAppConfig";
 import { useEpisodes } from "./hooks/useEpisodes";
 import { useSegmentKinds } from "./hooks/useSegmentKinds";
 import type { Episode } from "./lib/tauri";
@@ -18,6 +20,7 @@ export default function App() {
   const episodesState = useEpisodes();
   const { episodes, refresh } = episodesState;
   const segmentKinds = useSegmentKinds();
+  const appConfig = useAppConfig();
 
   // När ett jobb blir klart: refresha avsnittslistan.
   useEffect(() => {
@@ -84,6 +87,7 @@ export default function App() {
             job={jobs.get(selectedEpisode.id) ?? null}
             completionTick={completionTicks.get(selectedEpisode.id) ?? 0}
             segmentKinds={segmentKinds}
+            appConfig={appConfig}
           />
         )}
       </main>
@@ -96,9 +100,11 @@ export default function App() {
       {showSettings && (
         <SegmentKindSettings
           kinds={segmentKinds}
+          appConfig={appConfig}
           onClose={() => setShowSettings(false)}
         />
       )}
+      <TranscriptionToast />
     </div>
   );
 }

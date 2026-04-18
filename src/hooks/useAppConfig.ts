@@ -16,6 +16,9 @@ const DEFAULT_CONFIG: AppConfig = {
   export_loudness_normalize: false,
   confirm_delete_segment: true,
   shortcuts: {},
+  whisper_model: "base",
+  whisper_language: "sv",
+  transcribe_segment_kinds: ["chapter"],
 };
 
 export function useAppConfig(): AppConfigHook {

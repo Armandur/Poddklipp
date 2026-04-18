@@ -40,6 +40,43 @@ export default function AnalysisSection({ appConfig }: Props) {
         Standard är 0.70. Sänk om välkända jinglar missas; höj om du får falska träffar.
         Ändringen gäller nästa analys-körning.
       </p>
+
+      <div className="export-field" style={{ marginTop: "1rem" }}>
+        <label>Whisper-modell (transkribering)</label>
+        <select
+          value={config.whisper_model}
+          onChange={(e) => update({ whisper_model: e.target.value })}
+          style={{ width: "100%" }}
+        >
+          <option value="tiny">tiny — snabbast, lägst kvalitet (~39 MB)</option>
+          <option value="base">base — bra balans (~74 MB)</option>
+          <option value="small">small — bättre svenska (~244 MB)</option>
+          <option value="medium">medium — hög kvalitet (~769 MB)</option>
+          <option value="large">large — bäst, långsammast (~1.5 GB)</option>
+        </select>
+        <p className="settings-description" style={{ marginTop: "0.4rem" }}>
+          Modellen laddas ned vid första transkriberingen och cachas lokalt.
+        </p>
+      </div>
+
+      <div className="export-field" style={{ marginTop: "1rem" }}>
+        <label>Whisper-språk</label>
+        <select
+          value={config.whisper_language}
+          onChange={(e) => update({ whisper_language: e.target.value })}
+          style={{ width: "100%" }}
+        >
+          <option value="sv">Svenska (sv)</option>
+          <option value="en">Engelska (en)</option>
+          <option value="no">Norska (no)</option>
+          <option value="da">Danska (da)</option>
+          <option value="fi">Finska (fi)</option>
+          <option value="de">Tyska (de)</option>
+          <option value="fr">Franska (fr)</option>
+          <option value="es">Spanska (es)</option>
+        </select>
+      </div>
+
     </div>
   );
 }

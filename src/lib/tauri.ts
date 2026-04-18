@@ -152,6 +152,7 @@ export interface Segment {
   kind: SegmentKind;
   excluded: boolean;
   sort_order: number;
+  transcription: string | null;
 }
 
 export async function generateSegments(episodeId: number): Promise<Segment[]> {
@@ -182,6 +183,15 @@ export async function splitSegmentAt(episodeId: number, atMs: number): Promise<S
 
 export async function deleteSegment(id: number): Promise<void> {
   return invoke("delete_segment", { id });
+}
+
+// Startar transkribering i bakgrunden. Resultatet levereras via
+// `transcription-done` / `transcription-error`-events.
+export async function transcribeSegment(
+  segmentId: number,
+  durationMs?: number,
+): Promise<void> {
+  return invoke("transcribe_segment", { segmentId, durationMs });
 }
 
 // ── Segment kind settings ────────────────────────────────────────────────────
@@ -218,6 +228,9 @@ export interface AppConfig {
   export_loudness_normalize: boolean;
   confirm_delete_segment: boolean;
   shortcuts: Record<string, string>;
+  whisper_model: string;
+  whisper_language: string;
+  transcribe_segment_kinds: string[];
 }
 
 export async function getAppConfig(): Promise<AppConfig> {
