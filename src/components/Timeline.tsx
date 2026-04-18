@@ -22,6 +22,8 @@ interface TimelineProps {
   detections: Detection[];
   segments: Segment[];
   activeSegmentId?: number | null;
+  captureMode?: boolean;
+  onCapture?: (startMs: number, endMs: number) => void;
   onSegmentBoundaryChange: (segmentId: number, startMs: number, endMs: number) => void;
   onReady?: (api: TimelineApi) => void;
   onTimeUpdate?: (ms: number) => void;
@@ -40,6 +42,8 @@ export default function Timeline({
   detections,
   segments,
   activeSegmentId,
+  captureMode = false,
+  onCapture,
   onSegmentBoundaryChange,
   onReady,
   onTimeUpdate,
@@ -206,6 +210,30 @@ export default function Timeline({
     }
   }, [detections, segments, activeSegmentId, ready]);
 
+  // Drag-selection för jingel-lärande
+  useEffect(() => {
+    const regions = regionsRef.current;
+    if (!regions || !ready) return;
+    if (!captureMode) return;
+
+    const disable = regions.enableDragSelection({
+      color: "rgba(255, 200, 50, 0.35)",
+    });
+
+    const unsub = regions.on("region-created", (region) => {
+      const startMs = Math.round(region.start * 1000);
+      const endMs = Math.round(region.end * 1000);
+      region.remove();
+      disable();
+      onCapture?.(startMs, endMs);
+    });
+
+    return () => {
+      unsub();
+      disable();
+    };
+  }, [captureMode, ready, onCapture]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const ws = wavesurferRef.current;
@@ -309,7 +337,12 @@ export default function Timeline({
   return (
     <div className="timeline">
       {error && <div className="error">Timeline-fel: {error}</div>}
-      <div ref={containerRef} className="timeline-wave" />
+      {captureMode && (
+        <div className="timeline-capture-hint">
+          Dra i vågformen för att markera jingeln
+        </div>
+      )}
+      <div ref={containerRef} className="timeline-wave" style={captureMode ? { cursor: "crosshair" } : undefined} />
       <div className="timeline-controls">
         <button onClick={togglePlay} disabled={!ready}>
           {playing ? "Paus" : "Spela"}

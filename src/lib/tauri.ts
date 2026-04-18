@@ -33,6 +33,16 @@ export async function getJinglePath(id: number): Promise<string> {
   return invoke<string>("get_jingle_path", { id });
 }
 
+export async function createJingleFromClip(
+  episodeId: number,
+  startMs: number,
+  endMs: number,
+  name: string,
+  kind: Jingle["kind"],
+): Promise<Jingle> {
+  return invoke<Jingle>("create_jingle_from_clip", { episodeId, startMs, endMs, name, kind });
+}
+
 // ── Episodes ────────────────────────────────────────────────────────────────
 
 export interface Episode {

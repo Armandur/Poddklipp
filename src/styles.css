@@ -313,6 +313,16 @@ tr:last-child td {
   border-top: 1px solid var(--border);
 }
 
+.timeline-capture-hint {
+  padding: 0.35rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 200, 50, 0.12);
+  border: 1px solid rgba(255, 200, 50, 0.5);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #ffc832;
+}
+
 .timeline-marker {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

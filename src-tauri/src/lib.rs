@@ -47,6 +47,7 @@ pub fn run() {
             commands::jingles::list_jingles,
             commands::jingles::delete_jingle,
             commands::jingles::get_jingle_path,
+            commands::jingles::create_jingle_from_clip,
             commands::episodes::add_episode,
             commands::episodes::scan_folder,
             commands::episodes::list_episodes,

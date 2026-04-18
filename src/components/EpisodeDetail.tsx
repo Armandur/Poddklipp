@@ -15,6 +15,7 @@ import { JINGLE_KIND_LABELS } from "../lib/format";
 import Timeline, { TimelineApi } from "./Timeline";
 import SegmentTable from "./SegmentTable";
 import ExportDialog from "./ExportDialog";
+import JingleCaptureDialog from "./JingleCaptureDialog";
 
 interface EpisodeDetailProps {
   episode: Episode;
@@ -41,6 +42,8 @@ export default function EpisodeDetail({
   const [segments, setSegments] = useState<Segment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [captureMode, setCaptureMode] = useState(false);
+  const [captureRange, setCaptureRange] = useState<{ startMs: number; endMs: number } | null>(null);
   const [activeSegmentId, setActiveSegmentId] = useState<number | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<number | null>(null);
   const timelineApi = useRef<TimelineApi | null>(null);
@@ -220,6 +223,16 @@ export default function EpisodeDetail({
               Exportera
             </button>
           )}
+          {(analyzedAt || segments.length > 0) && (
+            <button
+              className={captureMode ? "danger" : "secondary"}
+              onClick={() => setCaptureMode((v) => !v)}
+              disabled={analyzing}
+              title="Dra i tidslinjen för att markera ett ljud som ny jingel"
+            >
+              {captureMode ? "Avbryt markering" : "Lär in jingel…"}
+            </button>
+          )}
           {segments.some((s) => s.kind === "chapter") && (
             <button
               className="secondary"
@@ -272,6 +285,11 @@ export default function EpisodeDetail({
           detections={detections}
           segments={segments}
           activeSegmentId={activeSegmentId}
+          captureMode={captureMode}
+          onCapture={(startMs, endMs) => {
+            setCaptureMode(false);
+            setCaptureRange({ startMs, endMs });
+          }}
           onSegmentBoundaryChange={handleBoundaryChange}
           onReady={(api) => { timelineApi.current = api; }}
           onTimeUpdate={handleTimeUpdate}
@@ -312,6 +330,15 @@ export default function EpisodeDetail({
           episodeId={episode.id}
           episodeName={episode.display_name}
           onClose={() => setShowExport(false)}
+        />
+      )}
+      {captureRange && (
+        <JingleCaptureDialog
+          episodeId={episode.id}
+          startMs={captureRange.startMs}
+          endMs={captureRange.endMs}
+          onDone={() => setCaptureRange(null)}
+          onCancel={() => setCaptureRange(null)}
         />
       )}
     </section>

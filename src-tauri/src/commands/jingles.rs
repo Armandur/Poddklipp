@@ -173,6 +173,70 @@ pub fn delete_jingle(state: State<AppState>, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Extrahera ett klipp ur ett avsnitt med ffmpeg och lägg till som jingel.
+#[tauri::command]
+pub fn create_jingle_from_clip(
+    state: State<AppState>,
+    episode_id: i64,
+    start_ms: i64,
+    end_ms: i64,
+    name: String,
+    kind: String,
+) -> Result<Jingle, String> {
+    let episode_path: String = {
+        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+        conn.query_row(
+            "SELECT source_path FROM episodes WHERE id = ?1",
+            params![episode_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("avsnitt hittades inte: {e}"))?
+    };
+
+    let timestamp = Utc::now().format("%Y%m%d%H%M%S%f");
+    let safe_name = sanitize_filename(&name);
+    let dest_name = format!("{timestamp}_{safe_name}.wav");
+    let dest: PathBuf = state.app_data_dir.join("jingles").join(&dest_name);
+
+    let start_sec = start_ms as f64 / 1000.0;
+    let end_sec = end_ms as f64 / 1000.0;
+
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            &episode_path,
+            "-ss",
+            &format!("{start_sec:.3}"),
+            "-to",
+            &format!("{end_sec:.3}"),
+            "-acodec",
+            "pcm_s16le",
+            dest.to_string_lossy().as_ref(),
+        ])
+        .status()
+        .map_err(|e| format!("ffmpeg kunde inte startas: {e}"))?;
+
+    if !status.success() {
+        return Err("ffmpeg misslyckades vid extraktion av klipp".to_string());
+    }
+
+    let (duration_ms, sample_rate) = probe_metadata(&dest);
+    let created_at = Utc::now().to_rfc3339();
+    let dest_str = dest.to_string_lossy().to_string();
+
+    let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+    conn.execute(
+        "INSERT INTO jingles (name, kind, file_path, duration_ms, sample_rate, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![name, kind, dest_str, duration_ms, sample_rate, created_at],
+    )
+    .map_err(|e| format!("DB-insert misslyckades: {e}"))?;
+
+    let id = conn.last_insert_rowid();
+    Ok(Jingle { id, name, kind, file_path: dest_str, duration_ms, sample_rate, created_at })
+}
+
 #[tauri::command]
 pub fn get_jingle_path(state: State<AppState>, id: i64) -> Result<String, String> {
     let conn = state.db.lock().map_err(|_| "DB-lås kunde inte tas".to_string())?;

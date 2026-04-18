@@ -11,7 +11,7 @@ from .decode import load_mono
 def compute_peaks(
     audio_path: str | Path,
     output_path: str | Path,
-    num_points: int = 4000,
+    num_points: int | None = None,
     sample_rate: int = 22050,
 ) -> dict:
     """
@@ -21,6 +21,11 @@ def compute_peaks(
     """
     pcm, sr = load_mono(audio_path, sample_rate)
     duration_ms = int(len(pcm) * 1000 / sr)
+
+    # ~10 peaks/sekund ger god upplösning vid typiska zoom-nivåer;
+    # minst 4 000 för att korta klipp inte ska bli för grova.
+    if num_points is None:
+        num_points = max(4000, int(len(pcm) / sr * 10))
 
     # Dela upp i num_points block och ta min/max per block
     chunk_size = max(1, len(pcm) // num_points)
