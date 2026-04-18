@@ -43,7 +43,7 @@ def handle(method: str, params: dict) -> dict:
         return compute_peaks(
             audio_path=params["path"],
             output_path=params["output_path"],
-            num_points=params.get("num_points", 4000),
+            num_points=params.get("num_points"),  # None → dynamisk (max(4000, dur*10))
             sample_rate=params.get("sample_rate", 22050),
         )
 

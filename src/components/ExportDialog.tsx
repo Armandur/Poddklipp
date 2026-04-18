@@ -1,7 +1,7 @@
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
-import { exportEpisode, ExportFormat } from "../lib/tauri";
+import { exportEpisode, ExportFormat, getAppConfig } from "../lib/tauri";
 
 interface ExportDialogProps {
   episodeId: number;
@@ -46,6 +46,12 @@ export default function ExportDialog({
 }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>("clean_mp3");
   const [outputPath, setOutputPath] = useState<string>("");
+
+  useEffect(() => {
+    getAppConfig().then((cfg) => {
+      setFormat(cfg.export_default_format as ExportFormat);
+    }).catch(() => {});
+  }, []);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState<{ value: number; stage: string } | null>(null);
   const [done, setDone] = useState<string | null>(null);

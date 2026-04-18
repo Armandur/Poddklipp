@@ -74,6 +74,8 @@ pub fn export_episode(
         return Err("Inga inkluderade segment att exportera.".into());
     }
 
+    let loudness_normalize = state.config.lock().map(|c| c.export_loudness_normalize).unwrap_or(false);
+
     let app_clone = app.clone();
     let format_clone = format.clone();
     let output_clone = output_path.clone();
@@ -86,6 +88,7 @@ pub fn export_episode(
             &included,
             &format_clone,
             Path::new(&output_clone),
+            loudness_normalize,
         );
         match result {
             Ok(out) => {
@@ -111,6 +114,7 @@ fn run_export(
     included: &[SegmentRow],
     format: &str,
     output: &Path,
+    loudness_normalize: bool,
 ) -> Result<String, String> {
     let emit_progress = |progress: f64, stage: &str| {
         let _ = app.emit(
@@ -123,7 +127,7 @@ fn run_export(
         "json" => export_json(included, output),
         "clean_mp3" => {
             let total_ms: i64 = included.iter().map(|s| s.end_ms - s.start_ms).sum();
-            concat_segments(episode_path, included, output, total_ms, &emit_progress)
+            concat_segments(episode_path, included, output, total_ms, loudness_normalize, &emit_progress)
         }
         "m4b_chapters" => {
             let total_ms: i64 = included.iter().map(|s| s.end_ms - s.start_ms).sum();
@@ -135,10 +139,11 @@ fn run_export(
                 output,
                 tmp_meta.as_path(),
                 total_ms,
+                loudness_normalize,
                 &emit_progress,
             )
         }
-        "chapters" => export_chapters(episode_path, included, output, &emit_progress),
+        "chapters" => export_chapters(episode_path, included, output, loudness_normalize, &emit_progress),
         _ => Err(format!("okänt exportformat: {format}")),
     }
 }
@@ -184,22 +189,28 @@ fn concat_segments(
     included: &[SegmentRow],
     output: &Path,
     total_ms: i64,
+    loudness_normalize: bool,
     on_progress: &dyn Fn(f64, &str),
 ) -> Result<String, String> {
     on_progress(0.0, "skriver segment-lista…");
     let list_file = write_temp_file("concat_list.txt", &build_concat_list(episode_path, included))?;
     on_progress(0.05, "kör ffmpeg…");
 
-    let args = vec![
+    let mut args = vec![
         "-y".into(),
         "-f".into(), "concat".into(),
         "-safe".into(), "0".into(),
         "-i".into(), list_file.to_string_lossy().into_owned(),
         "-c:a".into(), "libmp3lame".into(),
         "-q:a".into(), "2".into(),
-        "-progress".into(), "pipe:1".into(),
-        output.to_string_lossy().into_owned(),
     ];
+    if loudness_normalize {
+        args.push("-af".into());
+        args.push("loudnorm".into());
+    }
+    args.push("-progress".into());
+    args.push("pipe:1".into());
+    args.push(output.to_string_lossy().into_owned());
 
     run_ffmpeg_with_progress(&args, total_ms, on_progress)?;
     Ok(output.to_string_lossy().into_owned())
@@ -211,13 +222,14 @@ fn concat_m4b(
     output: &Path,
     meta_path: &Path,
     total_ms: i64,
+    loudness_normalize: bool,
     on_progress: &dyn Fn(f64, &str),
 ) -> Result<String, String> {
     on_progress(0.0, "skriver segment-lista…");
     let list_file = write_temp_file("concat_list.txt", &build_concat_list(episode_path, included))?;
     on_progress(0.05, "kör ffmpeg…");
 
-    let args = vec![
+    let mut args = vec![
         "-y".into(),
         "-f".into(), "concat".into(),
         "-safe".into(), "0".into(),
@@ -228,9 +240,14 @@ fn concat_m4b(
         "-c:a".into(), "aac".into(),
         "-b:a".into(), "128k".into(),
         "-movflags".into(), "+faststart".into(),
-        "-progress".into(), "pipe:1".into(),
-        output.to_string_lossy().into_owned(),
     ];
+    if loudness_normalize {
+        args.push("-af".into());
+        args.push("loudnorm".into());
+    }
+    args.push("-progress".into());
+    args.push("pipe:1".into());
+    args.push(output.to_string_lossy().into_owned());
 
     run_ffmpeg_with_progress(&args, total_ms, on_progress)?;
     Ok(output.to_string_lossy().into_owned())
@@ -242,6 +259,7 @@ fn export_chapters(
     episode_path: &str,
     included: &[SegmentRow],
     output_dir: &Path,
+    loudness_normalize: bool,
     on_progress: &dyn Fn(f64, &str),
 ) -> Result<String, String> {
     std::fs::create_dir_all(output_dir)
@@ -258,16 +276,21 @@ fn export_chapters(
         on_progress(i as f64 / total as f64, &format!("exporterar {filename}…"));
 
         let duration_ms = seg.end_ms - seg.start_ms;
-        let args = vec![
+        let mut args = vec![
             "-y".into(),
             "-i".into(), episode_path.to_string(),
             "-ss".into(), format_secs(seg.start_ms),
             "-to".into(), format_secs(seg.end_ms),
             "-c:a".into(), "libmp3lame".into(),
             "-q:a".into(), "2".into(),
-            "-progress".into(), "pipe:1".into(),
-            out_file.to_string_lossy().into_owned(),
         ];
+        if loudness_normalize {
+            args.push("-af".into());
+            args.push("loudnorm".into());
+        }
+        args.push("-progress".into());
+        args.push("pipe:1".into());
+        args.push(out_file.to_string_lossy().into_owned());
 
         // Per-segment progress skalas till hela exportens progress-intervall.
         let seg_start = i as f64 / total as f64;

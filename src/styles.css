@@ -95,7 +95,8 @@ button.danger {
   background: var(--danger);
 }
 
-input, select {
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select {
   font-family: inherit;
   font-size: 0.9rem;
   padding: 0.4rem 0.6rem;
@@ -105,9 +106,24 @@ input, select {
   border-radius: 4px;
 }
 
-input:focus, select:focus {
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+input[type="range"] {
+  padding: 0;
+  border: none;
+  background: transparent;
+  width: 100%;
 }
 
 .card {
@@ -115,6 +131,12 @@ input:focus, select:focus {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem;
+}
+
+.card-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 280px;
 }
 
 .card-header {
@@ -413,6 +435,91 @@ tr:last-child td {
   background: transparent;
 }
 
+.settings-dialog {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(680px, 94vw);
+  height: min(520px, 88vh);
+  display: flex;
+  overflow: hidden;
+}
+
+.settings-sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-sidebar-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 0 1rem 0.75rem;
+}
+
+.settings-nav-item {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-muted);
+  padding: 0.5rem 1rem;
+  text-align: left;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.settings-nav-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.settings-nav-item.active {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-left: 2px solid var(--accent);
+  padding-left: calc(1rem - 2px);
+}
+
+.settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-content-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.settings-body {
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.settings-description {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .export-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -438,7 +545,18 @@ tr:last-child td {
   margin-bottom: 1rem;
 }
 
-.export-field label {
+/* Checkbox-rad: bockruta + etikett horisontellt */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.9rem;
+}
+
+.export-field > label {
   font-size: 0.8rem;
   color: var(--text-muted);
   font-weight: 500;

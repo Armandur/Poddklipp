@@ -2,9 +2,10 @@ use crate::AppState;
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Debug, Serialize)]
 pub struct Jingle {
@@ -89,7 +90,7 @@ pub fn add_jingle(
     let timestamp = Utc::now().format("%Y%m%d%H%M%S%f");
     let safe_name = sanitize_filename(&input.name);
     let dest_name = format!("{timestamp}_{safe_name}.{ext}");
-    let dest: PathBuf = state.app_data_dir.join("jingles").join(&dest_name);
+    let dest: PathBuf = state.app_data_dir.lock().unwrap().join("jingles").join(&dest_name);
 
     std::fs::copy(source, &dest).map_err(|e| format!("kunde inte kopiera filen: {e}"))?;
 
@@ -176,6 +177,7 @@ pub fn delete_jingle(state: State<AppState>, id: i64) -> Result<(), String> {
 /// Extrahera ett klipp ur ett avsnitt med ffmpeg och lägg till som jingel.
 #[tauri::command]
 pub fn create_jingle_from_clip(
+    app: AppHandle,
     state: State<AppState>,
     episode_id: i64,
     start_ms: i64,
@@ -196,7 +198,7 @@ pub fn create_jingle_from_clip(
     let timestamp = Utc::now().format("%Y%m%d%H%M%S%f");
     let safe_name = sanitize_filename(&name);
     let dest_name = format!("{timestamp}_{safe_name}.wav");
-    let dest: PathBuf = state.app_data_dir.join("jingles").join(&dest_name);
+    let dest: PathBuf = state.app_data_dir.lock().unwrap().join("jingles").join(&dest_name);
 
     let start_sec = start_ms as f64 / 1000.0;
     let end_sec = end_ms as f64 / 1000.0;
@@ -234,7 +236,9 @@ pub fn create_jingle_from_clip(
     .map_err(|e| format!("DB-insert misslyckades: {e}"))?;
 
     let id = conn.last_insert_rowid();
-    Ok(Jingle { id, name, kind, file_path: dest_str, duration_ms, sample_rate, created_at })
+    let jingle = Jingle { id, name, kind, file_path: dest_str, duration_ms, sample_rate, created_at };
+    let _ = app.emit("jingle-added", json!({ "id": jingle.id }));
+    Ok(jingle)
 }
 
 #[tauri::command]

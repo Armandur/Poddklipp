@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import {
   addJingle,
@@ -26,6 +27,14 @@ export function useJingles() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    let u1: (() => void) | null = null;
+    let u2: (() => void) | null = null;
+    listen("jingle-added", () => refresh()).then((fn) => { u1 = fn; });
+    listen("data-dir-changed", () => refresh()).then((fn) => { u2 = fn; });
+    return () => { u1?.(); u2?.(); };
   }, [refresh]);
 
   const add = useCallback(

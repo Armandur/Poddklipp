@@ -4,6 +4,7 @@
 use crate::AppState;
 use rusqlite::{Connection, params};
 use serde::Serialize;
+use std::collections::HashMap;
 use tauri::State;
 
 #[derive(Debug, Serialize)]
@@ -55,7 +56,18 @@ pub fn regenerate_segments_in_db(conn: &mut Connection, episode_id: i64) -> Resu
     )
     .map_err(|e| e.to_string())?;
 
-    let plan = build_segment_plan(&detections, duration_ms);
+    // Läs exkluderings-standarder från segment_kinds-tabellen.
+    let exclusion_defaults: HashMap<String, bool> = {
+        let mut stmt = tx
+            .prepare("SELECT slug, default_excluded FROM segment_kinds")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0)))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let plan = build_segment_plan(&detections, duration_ms, &exclusion_defaults);
 
     {
         let mut insert = tx
@@ -105,7 +117,15 @@ struct PlannedSegment {
     excluded: bool,
 }
 
-fn build_segment_plan(detections: &[(String, i64)], duration_ms: i64) -> Vec<PlannedSegment> {
+fn excl(defaults: &HashMap<String, bool>, kind: &str, fallback: bool) -> bool {
+    *defaults.get(kind).unwrap_or(&fallback)
+}
+
+fn build_segment_plan(
+    detections: &[(String, i64)],
+    duration_ms: i64,
+    defaults: &HashMap<String, bool>,
+) -> Vec<PlannedSegment> {
     // Samla gränser: 0, varje detektion, duration.
     let mut boundaries: Vec<(i64, Option<&str>)> = Vec::with_capacity(detections.len() + 2);
     boundaries.push((0, None));
@@ -128,38 +148,36 @@ fn build_segment_plan(detections: &[(String, i64)], duration_ms: i64) -> Vec<Pla
 
         let (kind, label, excluded) = match start_kind {
             None => {
-                // Före första detektionen eller efter sista.
                 if plan.is_empty() {
-                    ("pre".to_string(), Some("Pre-roll".to_string()), false)
+                    let e = excl(defaults, "pre", false);
+                    ("pre".to_string(), Some("Pre-roll".to_string()), e)
                 } else {
-                    ("post".to_string(), Some("Post-roll".to_string()), false)
+                    let e = excl(defaults, "post", false);
+                    ("post".to_string(), Some("Post-roll".to_string()), e)
                 }
             }
-            Some("intro") => ("intro".to_string(), Some("Introduktion".to_string()), false),
-            Some("outro") => ("outro".to_string(), Some("Outro".to_string()), false),
+            Some("intro") => {
+                ("intro".to_string(), Some("Introduktion".to_string()), excl(defaults, "intro", false))
+            }
+            Some("outro") => {
+                ("outro".to_string(), Some("Outro".to_string()), excl(defaults, "outro", false))
+            }
             Some("chapter") => {
                 chapter_no += 1;
-                (
-                    "chapter".to_string(),
-                    Some(format!("Kapitel {chapter_no}")),
-                    false,
-                )
+                ("chapter".to_string(), Some(format!("Kapitel {chapter_no}")), excl(defaults, "chapter", false))
             }
             Some("ad_marker") => {
                 ad_open = !ad_open;
                 if ad_open {
-                    ("ad".to_string(), Some("Reklam".to_string()), true)
+                    ("ad".to_string(), Some("Reklam".to_string()), excl(defaults, "ad", true))
                 } else {
-                    // Reklam-ut → tillbaka till kapitel-innehåll
                     chapter_no += 1;
-                    (
-                        "chapter".to_string(),
-                        Some(format!("Kapitel {chapter_no}")),
-                        false,
-                    )
+                    ("chapter".to_string(), Some(format!("Kapitel {chapter_no}")), excl(defaults, "chapter", false))
                 }
             }
-            Some("custom") | Some(_) => ("content".to_string(), None, false),
+            Some("custom") | Some(_) => {
+                ("content".to_string(), None, excl(defaults, "content", false))
+            }
         };
 
         plan.push(PlannedSegment {
@@ -272,6 +290,83 @@ pub fn update_segment(
         .map_err(|e| e.to_string())?;
 
     Ok(seg)
+}
+
+/// Dela segmentet som innehåller `at_ms` i två delar vid den tidpunkten.
+/// Om inga segment finns skapas ett heltäckande segment som sedan delas.
+#[tauri::command]
+pub fn split_segment_at(
+    state: State<AppState>,
+    episode_id: i64,
+    at_ms: i64,
+) -> Result<Vec<Segment>, String> {
+    {
+        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+
+        let hit = conn
+            .query_row(
+                "SELECT id, end_ms, sort_order FROM segments
+                 WHERE episode_id = ?1 AND start_ms < ?2 AND end_ms > ?2
+                 ORDER BY sort_order LIMIT 1",
+                params![episode_id, at_ms],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+            )
+            .ok();
+
+        if let Some((id, end_ms, sort_order)) = hit {
+            conn.execute(
+                "UPDATE segments SET end_ms = ?1 WHERE id = ?2",
+                params![at_ms, id],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE segments SET sort_order = sort_order + 1
+                 WHERE episode_id = ?1 AND sort_order > ?2",
+                params![episode_id, sort_order],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT INTO segments (episode_id, start_ms, end_ms, label, kind, excluded, sort_order)
+                 VALUES (?1, ?2, ?3, NULL, 'content', 0, ?4)",
+                params![episode_id, at_ms, end_ms, sort_order + 1],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM segments WHERE episode_id = ?1",
+                    params![episode_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+
+            if count == 0 {
+                let duration_ms: i64 = conn
+                    .query_row(
+                        "SELECT duration_ms FROM episodes WHERE id = ?1",
+                        params![episode_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                if at_ms > 0 {
+                    conn.execute(
+                        "INSERT INTO segments (episode_id, start_ms, end_ms, label, kind, excluded, sort_order)
+                         VALUES (?1, 0, ?2, NULL, 'content', 0, 0)",
+                        params![episode_id, at_ms],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                conn.execute(
+                    "INSERT INTO segments (episode_id, start_ms, end_ms, label, kind, excluded, sort_order)
+                     VALUES (?1, ?2, ?3, NULL, 'content', 0, 1)",
+                    params![episode_id, at_ms, duration_ms],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    list_segments(state, episode_id)
 }
 
 #[tauri::command]

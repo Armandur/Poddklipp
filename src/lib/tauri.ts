@@ -100,6 +100,11 @@ export interface AnalysisResult {
   analyzed_at: string;
 }
 
+// Beräknar bara vågform (utan analys). Resultatet kommer via `waveform-ready`-event.
+export async function computeWaveform(episodeId: number): Promise<void> {
+  return invoke("compute_waveform", { episodeId });
+}
+
 // Startar analys i bakgrunden. Resultatet kommer via `analysis-complete`-event.
 // Preflight-fel (inga jinglar, okänt avsnitt) kastas direkt.
 export async function analyzeEpisode(
@@ -121,6 +126,10 @@ export interface WaveformPeaks {
 
 export async function getWaveformPeaks(episodeId: number): Promise<WaveformPeaks> {
   return invoke<WaveformPeaks>("get_waveform_peaks", { episodeId });
+}
+
+export async function getWaveformPeaksHi(episodeId: number): Promise<WaveformPeaks> {
+  return invoke<WaveformPeaks>("get_waveform_peaks_hi", { episodeId });
 }
 
 // ── Segments ────────────────────────────────────────────────────────────────
@@ -167,6 +176,10 @@ export async function updateSegment(input: UpdateSegmentInput): Promise<Segment>
   return invoke<Segment>("update_segment", { id, ...rest });
 }
 
+export async function splitSegmentAt(episodeId: number, atMs: number): Promise<Segment[]> {
+  return invoke<Segment[]>("split_segment_at", { episodeId, atMs });
+}
+
 export async function deleteSegment(id: number): Promise<void> {
   return invoke("delete_segment", { id });
 }
@@ -194,6 +207,35 @@ export async function updateSegmentKind(
     label,
     defaultExcluded,
   });
+}
+
+// ── App config ───────────────────────────────────────────────────────────────
+
+export interface AppConfig {
+  analysis_threshold: number;
+  export_default_format: string;
+  export_default_folder: string | null;
+  export_loudness_normalize: boolean;
+  confirm_delete_segment: boolean;
+  shortcuts: Record<string, string>;
+}
+
+export async function getAppConfig(): Promise<AppConfig> {
+  return invoke<AppConfig>("get_app_config");
+}
+
+export async function setAppConfig(config: AppConfig): Promise<void> {
+  return invoke("set_app_config", { newConfig: config });
+}
+
+// ── Storage settings ─────────────────────────────────────────────────────────
+
+export async function getDataDir(): Promise<string> {
+  return invoke<string>("get_data_dir");
+}
+
+export async function setDataDir(newPath: string, copyFiles: boolean): Promise<void> {
+  return invoke("set_data_dir", { newPath, copyFiles });
 }
 
 // ── Export ───────────────────────────────────────────────────────────────────

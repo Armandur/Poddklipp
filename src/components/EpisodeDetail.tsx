@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   analyzeEpisode,
+  computeWaveform,
   Detection,
   Episode,
   Segment,
   generateSegments,
   listDetections,
   listSegments,
+  splitSegmentAt,
   updateSegment,
 } from "../lib/tauri";
 import { AnalysisJob } from "../hooks/useAnalysisJobs";
 import { SegmentKindsHook } from "../hooks/useSegmentKinds";
+import { useAppConfig } from "../hooks/useAppConfig";
+import { matchShortcut } from "../lib/shortcuts";
 import { JINGLE_KIND_LABELS } from "../lib/format";
 import Timeline, { TimelineApi } from "./Timeline";
 import SegmentTable from "./SegmentTable";
@@ -41,6 +45,7 @@ export default function EpisodeDetail({
   const [detections, setDetections] = useState<Detection[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [waveformError, setWaveformError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [captureMode, setCaptureMode] = useState(false);
   const [captureRange, setCaptureRange] = useState<{ startMs: number; endMs: number } | null>(null);
@@ -48,10 +53,14 @@ export default function EpisodeDetail({
   const [editingSegmentId, setEditingSegmentId] = useState<number | null>(null);
   const timelineApi = useRef<TimelineApi | null>(null);
   const suppressTimeUpdateUntil = useRef<number>(0);
+  const currentMsRef = useRef<number>(0);
+  const { shortcuts, config: appConfig } = useAppConfig();
 
   const analyzing = job?.state === "running";
   const analyzedAt = episode.analyzed_at;
   const fileMissing = episode.file_missing;
+  const hasWaveform = episode.waveform_peaks_path !== null;
+  const computingWaveform = !hasWaveform && !fileMissing && !analyzing;
 
   // Ladda om varje gång avsnittet byts eller när en analys blir klar för just
   // det här avsnittet (completionTick räknas upp).
@@ -69,6 +78,13 @@ export default function EpisodeDetail({
     };
   }, [episode.id, completionTick]);
 
+  // Beräkna vågform automatiskt när avsnittet saknar den.
+  useEffect(() => {
+    if (episode.waveform_peaks_path || fileMissing) return;
+    setWaveformError(null);
+    computeWaveform(episode.id).catch((e) => setWaveformError(String(e)));
+  }, [episode.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (job?.state === "error" && job.error) setError(job.error);
   }, [job]);
@@ -79,6 +95,16 @@ export default function EpisodeDetail({
       await analyzeEpisode(episode.id);
       // Resultatet levereras via `analysis-complete`-event; useAnalysisJobs
       // håller progress-state och bumpar completionTick när det är klart.
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function splitHere() {
+    try {
+      setError(null);
+      const segs = await splitSegmentAt(episode.id, currentMsRef.current);
+      setSegments(segs);
     } catch (e) {
       setError(String(e));
     }
@@ -144,6 +170,7 @@ export default function EpisodeDetail({
   }
 
   function handleTimeUpdate(ms: number) {
+    currentMsRef.current = ms;
     if (Date.now() < suppressTimeUpdateUntil.current) return;
     const seg = segments.find((s) => ms >= s.start_ms && ms < s.end_ms);
     setActiveSegmentId(seg?.id ?? null);
@@ -182,27 +209,30 @@ export default function EpisodeDetail({
         return;
       }
 
-      if (e.key === "e" && !inText) {
+      if (!inText && matchShortcut(e, shortcuts.toggle_excluded)) {
         e.preventDefault();
         const seg = segments.find((s) => s.id === activeSegmentId);
         if (!seg) return;
         updateSegment({ id: activeSegmentId, excluded: !seg.excluded }).then((updated) => {
           setSegments((prev) => prev.map((s) => (s.id === activeSegmentId ? updated : s)));
         });
-      } else if (e.key === "n" && !inText) {
+      } else if (!inText && matchShortcut(e, shortcuts.rename_segment)) {
         e.preventDefault();
         setEditingSegmentId(activeSegmentId);
-      } else if (e.key === "a" && !inText) {
+      } else if (!inText && matchShortcut(e, shortcuts.mark_as_ad)) {
         e.preventDefault();
         const defaultExcluded = segmentKinds.defaultExcludedFor("ad");
         updateSegment({ id: activeSegmentId, kind: "ad", excluded: defaultExcluded }).then((updated) => {
           setSegments((prev) => prev.map((s) => (s.id === activeSegmentId ? updated : s)));
         });
+      } else if (!inText && matchShortcut(e, shortcuts.split_here)) {
+        e.preventDefault();
+        splitHere();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeSegmentId, segments, segmentKinds]);
+  }, [activeSegmentId, segments, segmentKinds, shortcuts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const detectionsByKind = detections.reduce<Record<string, number>>((acc, d) => {
     acc[d.jingle_kind] = (acc[d.jingle_kind] ?? 0) + 1;
@@ -223,7 +253,17 @@ export default function EpisodeDetail({
               Exportera
             </button>
           )}
-          {(analyzedAt || segments.length > 0) && (
+          {hasWaveform && (
+            <button
+              className="secondary"
+              onClick={splitHere}
+              disabled={analyzing}
+              title="Dela segment vid nuvarande spelposition (S)"
+            >
+              Dela här
+            </button>
+          )}
+          {hasWaveform && (
             <button
               className={captureMode ? "danger" : "secondary"}
               onClick={() => setCaptureMode((v) => !v)}
@@ -277,15 +317,26 @@ export default function EpisodeDetail({
         </div>
       )}
 
+      {computingWaveform && !waveformError && (
+        <div className="progress">
+          <div className="progress-bar">
+            <div className="progress-bar-fill" style={{ width: "100%", opacity: 0.5, animation: "none" }} />
+          </div>
+          <div className="progress-stage">Beräknar vågform…</div>
+        </div>
+      )}
+
+      {waveformError && <div className="error">Vågformsfel: {waveformError}</div>}
       {error && <div className="error">Fel: {error}</div>}
 
-      {(analyzedAt || segments.length > 0) && (
+      {hasWaveform && (
         <Timeline
           episode={episode}
           detections={detections}
           segments={segments}
           activeSegmentId={activeSegmentId}
           captureMode={captureMode}
+          shortcuts={shortcuts}
           onCapture={(startMs, endMs) => {
             setCaptureMode(false);
             setCaptureRange({ startMs, endMs });
@@ -323,6 +374,7 @@ export default function EpisodeDetail({
         editingSegmentId={editingSegmentId}
         onEditingDone={() => setEditingSegmentId(null)}
         segmentKinds={segmentKinds}
+        confirmDelete={appConfig.confirm_delete_segment}
       />
 
       {showExport && (

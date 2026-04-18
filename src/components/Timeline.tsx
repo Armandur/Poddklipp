@@ -3,13 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { Region } from "wavesurfer.js/dist/plugins/regions.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.js";
-import { Detection, Episode, Segment, getWaveformPeaks } from "../lib/tauri";
+import HoverPlugin from "wavesurfer.js/dist/plugins/hover.js";
+import { Detection, Episode, Segment, WaveformPeaks, getWaveformPeaks, getWaveformPeaksHi } from "../lib/tauri";
 import {
   formatDuration,
   JINGLE_KIND_LABELS,
   SEGMENT_KIND_COLORS,
   SEGMENT_KIND_LABELS,
 } from "../lib/format";
+import { ResolvedShortcuts, matchShortcut } from "../lib/shortcuts";
 
 export interface TimelineApi {
   seekMs: (ms: number) => void;
@@ -23,6 +25,7 @@ interface TimelineProps {
   segments: Segment[];
   activeSegmentId?: number | null;
   captureMode?: boolean;
+  shortcuts?: ResolvedShortcuts;
   onCapture?: (startMs: number, endMs: number) => void;
   onSegmentBoundaryChange: (segmentId: number, startMs: number, endMs: number) => void;
   onReady?: (api: TimelineApi) => void;
@@ -43,6 +46,7 @@ export default function Timeline({
   segments,
   activeSegmentId,
   captureMode = false,
+  shortcuts,
   onCapture,
   onSegmentBoundaryChange,
   onReady,
@@ -60,6 +64,12 @@ export default function Timeline({
   const [error, setError] = useState<string | null>(null);
   // Zoomnivå i px/sekund. `null` = fit-to-window (beräknas vid ready/resize).
   const [zoomPxPerSec, setZoomPxPerSec] = useState<number | null>(null);
+  // Waveform-peaks tier-system: lo-res alltid, hi-res lazy-laddad vid inzoomning.
+  const loDataRef = useRef<WaveformPeaks | null>(null);
+  const hiDataRef = useRef<WaveformPeaks | null>(null);
+  const peakTierRef = useRef<"lo" | "hi">("lo");
+  const switchingRef = useRef(false);
+  const [regionsTick, setRegionsTick] = useState(0);
   const durationSec = episode.duration_ms / 1000;
 
   const fitZoom = useCallback(() => {
@@ -91,6 +101,10 @@ export default function Timeline({
 
       try {
         const peaks = await getWaveformPeaks(episode.id);
+        loDataRef.current = peaks;
+        hiDataRef.current = null;
+        peakTierRef.current = "lo";
+        switchingRef.current = false;
         if (cancelled || !containerRef.current) return;
 
         wavesurferRef.current?.destroy();
@@ -112,7 +126,17 @@ export default function Timeline({
           url: convertFileSrc(episode.source_path),
           peaks: [peaks.maxs],
           duration: peaks.duration_ms / 1000,
-          plugins: [regions, TimelinePlugin.create()],
+          plugins: [
+            regions,
+            TimelinePlugin.create(),
+            HoverPlugin.create({
+              lineColor: "rgba(255,255,255,0.5)",
+              lineWidth: 1,
+              labelBackground: "rgba(30,30,40,0.85)",
+              labelColor: "#e6e6ea",
+              labelSize: "11px",
+            }),
+          ],
         });
         wavesurferRef.current = ws;
 
@@ -208,7 +232,7 @@ export default function Timeline({
       });
       detectionRegionsRef.current.push(region);
     }
-  }, [detections, segments, activeSegmentId, ready]);
+  }, [detections, segments, activeSegmentId, ready, regionsTick]);
 
   // Drag-selection för jingel-lärande
   useEffect(() => {
@@ -234,6 +258,61 @@ export default function Timeline({
     };
   }, [captureMode, ready, onCapture]);
 
+  // Byt peak-tier baserat på zoomnivå: hi-res laddas lazy vid > 15 px/sek.
+  useEffect(() => {
+    if (!ready || zoomPxPerSec === null) return;
+    const HI_THRESHOLD = 10;
+    const shouldBeHi = zoomPxPerSec > HI_THRESHOLD;
+    if ((shouldBeHi ? "hi" : "lo") === peakTierRef.current) return;
+    if (switchingRef.current) return;
+
+    const targetTier = shouldBeHi ? "hi" : "lo";
+
+    async function doSwitch() {
+      switchingRef.current = true;
+      let peaks: WaveformPeaks | null = null;
+
+      if (targetTier === "hi") {
+        if (!hiDataRef.current) {
+          try {
+            hiDataRef.current = await getWaveformPeaksHi(episode.id);
+          } catch {
+            switchingRef.current = false;
+            return;
+          }
+        }
+        peaks = hiDataRef.current;
+      } else {
+        peaks = loDataRef.current;
+      }
+
+      const ws = wavesurferRef.current;
+      if (!peaks || !ws) { switchingRef.current = false; return; }
+
+      peakTierRef.current = targetTier;
+      const savedTime = ws.getCurrentTime();
+      const savedZoom = zoomPxPerSec;
+
+      ws.once("ready", () => {
+        const dur = ws.getDuration();
+        if (dur > 0 && savedTime > 0) {
+          ws.seekTo(Math.max(0, Math.min(1, savedTime / dur)));
+        }
+        if (savedZoom != null) ws.zoom(savedZoom);
+        switchingRef.current = false;
+        setRegionsTick((t) => t + 1);
+      });
+
+      ws.load(
+        convertFileSrc(episode.source_path),
+        [peaks.maxs],
+        peaks.duration_ms / 1000,
+      );
+    }
+
+    doSwitch();
+  }, [zoomPxPerSec, ready, episode.id, episode.source_path]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const ws = wavesurferRef.current;
@@ -242,13 +321,29 @@ export default function Timeline({
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
         return;
       }
-      if (e.key === " ") {
+      const sc = shortcuts;
+      if (sc && matchShortcut(e, sc.play_pause)) {
         e.preventDefault();
         ws.playPause();
-      } else if (e.key === "ArrowLeft") {
+      } else if (sc && matchShortcut(e, sc.seek_back_30)) {
+        e.preventDefault();
+        ws.skip(-30);
+      } else if (sc && matchShortcut(e, sc.seek_back_5)) {
+        e.preventDefault();
+        ws.skip(-5);
+      } else if (sc && matchShortcut(e, sc.seek_forward_30)) {
+        e.preventDefault();
+        ws.skip(30);
+      } else if (sc && matchShortcut(e, sc.seek_forward_5)) {
+        e.preventDefault();
+        ws.skip(5);
+      } else if (!sc && e.key === " ") {
+        e.preventDefault();
+        ws.playPause();
+      } else if (!sc && e.key === "ArrowLeft") {
         e.preventDefault();
         ws.skip(e.shiftKey ? -30 : -5);
-      } else if (e.key === "ArrowRight") {
+      } else if (!sc && e.key === "ArrowRight") {
         e.preventDefault();
         ws.skip(e.shiftKey ? 30 : 5);
       } else if (e.key === "+" || e.key === "=") {

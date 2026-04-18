@@ -121,6 +121,7 @@ export default function JingleLibrary() {
 
       {error && <div className="error">Fel: {error}</div>}
 
+      <div className="card-scroll">
       {loading ? (
         <div className="empty-state">Laddar…</div>
       ) : jingles.length === 0 ? (
@@ -160,6 +161,7 @@ export default function JingleLibrary() {
           </tbody>
         </table>
       )}
+      </div>
 
       <audio ref={audioRef} onEnded={() => setPlayingId(null)} />
     </section>

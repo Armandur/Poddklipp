@@ -76,6 +76,7 @@ export default function EpisodeList({
 
       {error && <div className="error">Fel: {error}</div>}
 
+      <div className="card-scroll">
       {loading ? (
         <div className="empty-state">Laddar…</div>
       ) : episodes.length === 0 ? (
@@ -141,6 +142,7 @@ export default function EpisodeList({
           </tbody>
         </table>
       )}
+      </div>
     </section>
   );
 }

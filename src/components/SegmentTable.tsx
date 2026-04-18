@@ -15,6 +15,7 @@ interface SegmentTableProps {
   editingSegmentId: number | null;
   onEditingDone: () => void;
   segmentKinds: SegmentKindsHook;
+  confirmDelete?: boolean;
 }
 
 export default function SegmentTable({
@@ -26,6 +27,7 @@ export default function SegmentTable({
   editingSegmentId,
   onEditingDone,
   segmentKinds,
+  confirmDelete = true,
 }: SegmentTableProps) {
   const [error, setError] = useState<string | null>(null);
   const inputRefs = useRef<Map<number, HTMLInputElement>>(new Map());
@@ -57,6 +59,7 @@ export default function SegmentTable({
   }
 
   async function remove(id: number) {
+    if (confirmDelete && !window.confirm("Ta bort segmentet?")) return;
     try {
       await deleteSegment(id);
       onChange(segments.filter((s) => s.id !== id));
@@ -72,7 +75,7 @@ export default function SegmentTable({
       <h3>
         Segment
         <span className="segment-table-hint">
-          ↑↓ = byt segment · Enter = spela · E = exkludera · N = byt namn · A = reklam
+          ↑↓ = byt segment · Enter = spela · E = exkludera · N = byt namn · A = reklam · S = dela här
         </span>
       </h3>
       {error && <div className="error">{error}</div>}

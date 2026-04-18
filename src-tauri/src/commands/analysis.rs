@@ -39,6 +39,102 @@ pub struct JingleForSidecar {
     pub file_path: String,
 }
 
+/// Beräkna bara vågform (lo + hi) utan jingel-analys. Returnerar direkt.
+/// Emittar `waveform-ready` / `waveform-error` med `episode_id`.
+#[tauri::command]
+pub fn compute_waveform(
+    app: AppHandle,
+    state: State<AppState>,
+    episode_id: i64,
+) -> Result<(), String> {
+    {
+        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+        let _: i64 = conn
+            .query_row(
+                "SELECT id FROM episodes WHERE id = ?1",
+                params![episode_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("avsnitt hittades inte: {e}"))?;
+    }
+
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_clone.state::<AppState>();
+
+        let episode_path: String = {
+            let conn = state.db.lock().unwrap();
+            conn.query_row(
+                "SELECT source_path FROM episodes WHERE id = ?1",
+                params![episode_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default()
+        };
+        let (peaks_path_str, hi_peaks_path_str) = {
+            let dir = state.app_data_dir.lock().unwrap();
+            let p = dir.join("waveforms").join(format!("{episode_id}.json"));
+            let h = dir.join("waveforms").join(format!("{episode_id}_hi.json"));
+            (p.to_string_lossy().into_owned(), h.to_string_lossy().into_owned())
+        };
+
+        if episode_path.is_empty() {
+            return;
+        }
+
+        let on_progress = |progress: f64, stage: &str| {
+            let _ = app_clone.emit(
+                "sidecar-progress",
+                json!({ "episode_id": episode_id, "progress": progress, "stage": stage }),
+            );
+        };
+
+        let result = (|| -> Result<(), String> {
+            let mut guard = state.sidecar.lock().map_err(|_| "sidecar-lås".to_string())?;
+            if guard.is_none() {
+                *guard = Some(Sidecar::spawn().map_err(|e| e.to_string())?);
+            }
+            let sidecar = guard.as_mut().unwrap();
+
+            let wf = sidecar
+                .call("waveform", json!({ "path": episode_path, "output_path": peaks_path_str }), &on_progress)
+                .map_err(|e| e.to_string())?;
+
+            let duration_ms = wf.get("duration_ms").and_then(|v| v.as_i64()).unwrap_or(0);
+            let num_hi = ((duration_ms / 1000) * 200).min(1_000_000).max(4_000);
+            sidecar
+                .call("waveform", json!({ "path": episode_path, "output_path": hi_peaks_path_str, "num_points": num_hi }), &on_progress)
+                .map_err(|e| e.to_string())?;
+
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                {
+                    let conn = state.db.lock().unwrap();
+                    let _ = conn.execute(
+                        "UPDATE episodes SET waveform_peaks_path = ?1 WHERE id = ?2",
+                        params![peaks_path_str, episode_id],
+                    );
+                }
+                let _ = app_clone.emit(
+                    "waveform-ready",
+                    json!({ "episode_id": episode_id, "waveform_peaks_path": peaks_path_str }),
+                );
+            }
+            Err(e) => {
+                let _ = app_clone.emit(
+                    "waveform-error",
+                    json!({ "episode_id": episode_id, "error": e }),
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
 /// Preflight + starta bakgrundjobb. Returnerar direkt.
 #[tauri::command]
 pub fn analyze_episode(
@@ -125,11 +221,12 @@ fn run_analysis(
         (episode_path, jingles)
     };
 
-    let peaks_path = state
-        .app_data_dir
-        .join("waveforms")
-        .join(format!("{episode_id}.json"));
-    let peaks_path_str = peaks_path.to_string_lossy().to_string();
+    let (peaks_path_str, hi_peaks_path_str) = {
+        let dir = state.app_data_dir.lock().unwrap();
+        let p = dir.join("waveforms").join(format!("{episode_id}.json"));
+        let h = dir.join("waveforms").join(format!("{episode_id}_hi.json"));
+        (p.to_string_lossy().into_owned(), h.to_string_lossy().into_owned())
+    };
 
     // Progress-emit med episode_id så frontend kan filtrera.
     let on_progress = |progress: f64, stage: &str| {
@@ -152,12 +249,30 @@ fn run_analysis(
         }
         let sidecar = guard.as_mut().unwrap();
 
-        sidecar
+        let waveform_result = sidecar
             .call(
                 "waveform",
                 json!({
                     "path": episode_path,
                     "output_path": peaks_path_str,
+                }),
+                &on_progress,
+            )
+            .map_err(|e| e.to_string())?;
+
+        // Hi-res peaks: 200 samples/sek, max 1 000 000 datapunkter.
+        let duration_ms = waveform_result
+            .get("duration_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let num_hi = ((duration_ms / 1000) * 200).min(1_000_000).max(4_000);
+        sidecar
+            .call(
+                "waveform",
+                json!({
+                    "path": episode_path,
+                    "output_path": hi_peaks_path_str,
+                    "num_points": num_hi,
                 }),
                 &on_progress,
             )
@@ -180,7 +295,9 @@ fn run_analysis(
                 json!({
                     "episode_path": episode_path,
                     "jingles": jingles_json,
-                    "threshold": threshold.unwrap_or(0.6),
+                    "threshold": threshold.unwrap_or_else(|| {
+                        state.config.lock().map(|c| c.analysis_threshold).unwrap_or(0.7)
+                    }),
                 }),
                 &on_progress,
             )
@@ -290,6 +407,22 @@ pub fn get_waveform_peaks(
 
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("kunde inte läsa peaks-filen: {e}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("ogiltig peaks-JSON: {e}"))
+}
+
+#[tauri::command]
+pub fn get_waveform_peaks_hi(
+    state: State<AppState>,
+    episode_id: i64,
+) -> Result<WaveformPeaks, String> {
+    let path = state
+        .app_data_dir
+        .lock()
+        .unwrap()
+        .join("waveforms")
+        .join(format!("{episode_id}_hi.json"));
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|_| "hi-res peaks saknas — kör om analysen".to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("ogiltig peaks-JSON: {e}"))
 }
 
