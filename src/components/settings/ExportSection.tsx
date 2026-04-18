@@ -57,6 +57,51 @@ export default function ExportSection({ appConfig }: Props) {
         </div>
       </div>
 
+      <p className="settings-description" style={{ marginTop: "1.25rem", marginBottom: "0.5rem" }}>
+        Filnamnsmallar — tillgängliga variabler: <code>{"{title}"}</code> = avsnittsnamn,{" "}
+        <code>{"{label}"}</code> = segmentnamn, <code>{"{n}"}</code> = tvåsiffrigt löpnummer (kapitelfiler).
+      </p>
+
+      <div className="export-field">
+        <label>Ren MP3 — filnamn</label>
+        <input
+          type="text"
+          value={config.export_filename_clean_mp3}
+          onChange={(e) => update({ export_filename_clean_mp3: e.target.value })}
+          placeholder="{title}-clean"
+        />
+      </div>
+
+      <div className="export-field">
+        <label>Separata kapitelfiler — filnamn</label>
+        <input
+          type="text"
+          value={config.export_filename_chapters}
+          onChange={(e) => update({ export_filename_chapters: e.target.value })}
+          placeholder="{n} {label}"
+        />
+      </div>
+
+      <div className="export-field">
+        <label>M4B med kapitelmarkeringar — filnamn</label>
+        <input
+          type="text"
+          value={config.export_filename_m4b_chapters}
+          onChange={(e) => update({ export_filename_m4b_chapters: e.target.value })}
+          placeholder="{title}"
+        />
+      </div>
+
+      <div className="export-field">
+        <label>JSON-metadata — filnamn</label>
+        <input
+          type="text"
+          value={config.export_filename_json}
+          onChange={(e) => update({ export_filename_json: e.target.value })}
+          placeholder="{title}"
+        />
+      </div>
+
       <label className="check-row">
         <input
           type="checkbox"

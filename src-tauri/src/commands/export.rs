@@ -28,6 +28,7 @@ struct SegmentRow {
 /// Starta export i bakgrunden. `format` är en av:
 ///   "clean_mp3" | "chapters" | "id3_chapters" | "json"
 /// `output_path` är fil-sökväg för clean/id3/json, mapp-sökväg för chapters.
+/// `chapter_filename_template` styr filnamnen vid chapters-export ({n}, {label}, {title}).
 #[tauri::command]
 pub fn export_episode(
     app: AppHandle,
@@ -35,15 +36,16 @@ pub fn export_episode(
     episode_id: i64,
     format: String,
     output_path: String,
+    chapter_filename_template: Option<String>,
 ) -> Result<(), String> {
-    let (episode_path, segments) = {
+    let (episode_path, episode_title, segments) = {
         let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
 
-        let episode_path: String = conn
+        let (episode_path, episode_title): (String, String) = conn
             .query_row(
-                "SELECT source_path FROM episodes WHERE id = ?1",
+                "SELECT source_path, display_name FROM episodes WHERE id = ?1",
                 params![episode_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(|e| format!("avsnitt hittades inte: {e}"))?;
 
@@ -66,7 +68,7 @@ pub fn export_episode(
             })
             .map_err(|e| e.to_string())?;
         let result: Result<Vec<_>, _> = rows.collect();
-        (episode_path, result.map_err(|e| e.to_string())?)
+        (episode_path, episode_title, result.map_err(|e| e.to_string())?)
     };
 
     let included: Vec<SegmentRow> = segments.into_iter().filter(|s| !s.excluded).collect();
@@ -74,7 +76,10 @@ pub fn export_episode(
         return Err("Inga inkluderade segment att exportera.".into());
     }
 
-    let loudness_normalize = state.config.lock().map(|c| c.export_loudness_normalize).unwrap_or(false);
+    let (loudness_normalize, default_chapter_template) = state.config.lock()
+        .map(|c| (c.export_loudness_normalize, c.export_filename_chapters.clone()))
+        .unwrap_or((false, "{n} {label}".to_string()));
+    let chapter_template = chapter_filename_template.unwrap_or(default_chapter_template);
 
     let app_clone = app.clone();
     let format_clone = format.clone();
@@ -85,10 +90,12 @@ pub fn export_episode(
             &app_clone,
             episode_id,
             &episode_path,
+            &episode_title,
             &included,
             &format_clone,
             Path::new(&output_clone),
             loudness_normalize,
+            &chapter_template,
         );
         match result {
             Ok(out) => {
@@ -111,10 +118,12 @@ fn run_export(
     app: &AppHandle,
     episode_id: i64,
     episode_path: &str,
+    episode_title: &str,
     included: &[SegmentRow],
     format: &str,
     output: &Path,
     loudness_normalize: bool,
+    chapter_template: &str,
 ) -> Result<String, String> {
     let emit_progress = |progress: f64, stage: &str| {
         let _ = app.emit(
@@ -143,7 +152,7 @@ fn run_export(
                 &emit_progress,
             )
         }
-        "chapters" => export_chapters(episode_path, included, output, loudness_normalize, &emit_progress),
+        "chapters" => export_chapters(episode_path, episode_title, included, output, chapter_template, loudness_normalize, &emit_progress),
         _ => Err(format!("okänt exportformat: {format}")),
     }
 }
@@ -255,10 +264,20 @@ fn concat_m4b(
 
 // ── Separata kapitel ────────────────────────────────────────────────────────
 
+fn apply_chapter_template(template: &str, n: usize, label: &str, title: &str) -> String {
+    let safe = |s: &str| s.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    template
+        .replace("{n}", &format!("{:02}", n))
+        .replace("{label}", &safe(label))
+        .replace("{title}", &safe(title))
+}
+
 fn export_chapters(
     episode_path: &str,
+    episode_title: &str,
     included: &[SegmentRow],
     output_dir: &Path,
+    filename_template: &str,
     loudness_normalize: bool,
     on_progress: &dyn Fn(f64, &str),
 ) -> Result<String, String> {
@@ -269,8 +288,8 @@ fn export_chapters(
     for (i, seg) in included.iter().enumerate() {
         let fallback = format!("segment_{}", i + 1);
         let label = seg.label.as_deref().unwrap_or(&fallback);
-        let safe_label = label.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-        let filename = format!("{:02}_{safe_label}.mp3", i + 1);
+        let stem = apply_chapter_template(filename_template, i + 1, label, episode_title);
+        let filename = format!("{stem}.mp3");
         let out_file = output_dir.join(&filename);
 
         on_progress(i as f64 / total as f64, &format!("exporterar {filename}…"));

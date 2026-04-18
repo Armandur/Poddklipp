@@ -226,6 +226,10 @@ export interface AppConfig {
   export_default_format: string;
   export_default_folder: string | null;
   export_loudness_normalize: boolean;
+  export_filename_clean_mp3: string;
+  export_filename_chapters: string;
+  export_filename_m4b_chapters: string;
+  export_filename_json: string;
   confirm_delete_segment: boolean;
   shortcuts: Record<string, string>;
   whisper_model: string;
@@ -259,6 +263,7 @@ export async function exportEpisode(
   episodeId: number,
   format: ExportFormat,
   outputPath: string,
+  chapterFilenameTemplate?: string,
 ): Promise<void> {
-  return invoke("export_episode", { episodeId, format, outputPath });
+  return invoke("export_episode", { episodeId, format, outputPath, chapterFilenameTemplate });
 }

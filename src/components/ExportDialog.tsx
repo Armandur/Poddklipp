@@ -46,24 +46,46 @@ export default function ExportDialog({
 }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>("clean_mp3");
   const [outputPath, setOutputPath] = useState<string>("");
+  const [exportConfig, setExportConfig] = useState<{ export_default_folder: string | null; export_filename_clean_mp3: string; export_filename_chapters: string; export_filename_m4b_chapters: string; export_filename_json: string } | null>(null);
+
+  function applyTemplate(template: string, title: string): string {
+    return template.replace("{title}", title);
+  }
+
+  function buildDefaultPath(
+    cfg: { export_default_folder?: string | null; export_filename_clean_mp3: string; export_filename_chapters: string; export_filename_m4b_chapters: string; export_filename_json: string },
+    fmt: ExportFormat,
+    title: string,
+  ): string {
+    if (!cfg.export_default_folder) return "";
+    const folder = cfg.export_default_folder;
+    const sep = folder.includes("\\") ? "\\" : "/";
+    const templateMap: Record<ExportFormat, string> = {
+      clean_mp3: cfg.export_filename_clean_mp3,
+      chapters: cfg.export_filename_chapters,
+      m4b_chapters: cfg.export_filename_m4b_chapters,
+      json: cfg.export_filename_json,
+    };
+    const stem = applyTemplate(templateMap[fmt], title);
+    const ext = FORMAT_EXTENSIONS[fmt][0];
+    if (fmt === "chapters") return `${folder}${sep}${stem.replace("{n}", "01").replace("{label}", title)}`;
+    return ext ? `${folder}${sep}${stem}.${ext}` : "";
+  }
 
   useEffect(() => {
     getAppConfig().then((cfg) => {
       const fmt = cfg.export_default_format as ExportFormat;
+      const safe = episodeName.replace(/[<>:"/\\|?*]/g, "_");
+      const ec = {
+        export_default_folder: cfg.export_default_folder ?? null,
+        export_filename_clean_mp3: cfg.export_filename_clean_mp3,
+        export_filename_chapters: cfg.export_filename_chapters,
+        export_filename_m4b_chapters: cfg.export_filename_m4b_chapters,
+        export_filename_json: cfg.export_filename_json,
+      };
+      setExportConfig(ec);
       setFormat(fmt);
-      if (cfg.export_default_folder) {
-        const folder = cfg.export_default_folder;
-        const sep = folder.includes("\\") ? "\\" : "/";
-        const safe = episodeName.replace(/[<>:"/\\|?*]/g, "_");
-        const ext = FORMAT_EXTENSIONS[fmt][0];
-        setOutputPath(
-          fmt === "chapters"
-            ? `${folder}${sep}${safe}`
-            : ext
-            ? `${folder}${sep}${safe}.${ext}`
-            : ""
-        );
-      }
+      setOutputPath(buildDefaultPath(ec, fmt, safe));
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [exporting, setExporting] = useState(false);
@@ -128,7 +150,12 @@ export default function ExportDialog({
     setExporting(true);
     setProgress({ value: 0, stage: "startar…" });
     try {
-      await exportEpisode(episodeId, format, outputPath);
+      await exportEpisode(
+        episodeId,
+        format,
+        outputPath,
+        format === "chapters" ? exportConfig?.export_filename_chapters : undefined,
+      );
     } catch (e) {
       setExporting(false);
       setProgress(null);
@@ -155,8 +182,10 @@ export default function ExportDialog({
           <select
             value={format}
             onChange={(e) => {
-              setFormat(e.target.value as ExportFormat);
-              setOutputPath("");
+              const fmt = e.target.value as ExportFormat;
+              setFormat(fmt);
+              const safe = episodeName.replace(/[<>:"/\\|?*]/g, "_");
+              setOutputPath(exportConfig ? buildDefaultPath(exportConfig, fmt, safe) : "");
               setDone(null);
             }}
             disabled={exporting}

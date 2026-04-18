@@ -25,6 +25,14 @@ pub struct AppConfig {
     pub whisper_language: String,
     #[serde(default = "default_transcribe_kinds")]
     pub transcribe_segment_kinds: Vec<String>,
+    #[serde(default = "default_filename_clean_mp3")]
+    pub export_filename_clean_mp3: String,
+    #[serde(default = "default_filename_chapters")]
+    pub export_filename_chapters: String,
+    #[serde(default = "default_filename_m4b_chapters")]
+    pub export_filename_m4b_chapters: String,
+    #[serde(default = "default_filename_json")]
+    pub export_filename_json: String,
 }
 
 fn default_threshold() -> f64 { 0.7 }
@@ -33,6 +41,10 @@ fn default_confirm_delete() -> bool { true }
 fn default_whisper_model() -> String { "base".to_string() }
 fn default_whisper_language() -> String { "sv".to_string() }
 fn default_transcribe_kinds() -> Vec<String> { vec!["chapter".to_string()] }
+fn default_filename_clean_mp3() -> String { "{title}-clean".to_string() }
+fn default_filename_chapters() -> String { "{n} {label}".to_string() }
+fn default_filename_m4b_chapters() -> String { "{title}".to_string() }
+fn default_filename_json() -> String { "{title}".to_string() }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -47,6 +59,10 @@ impl Default for AppConfig {
             whisper_model: "base".to_string(),
             whisper_language: "sv".to_string(),
             transcribe_segment_kinds: vec!["chapter".to_string()],
+            export_filename_clean_mp3: default_filename_clean_mp3(),
+            export_filename_chapters: default_filename_chapters(),
+            export_filename_m4b_chapters: default_filename_m4b_chapters(),
+            export_filename_json: default_filename_json(),
         }
     }
 }
