@@ -49,9 +49,23 @@ export default function ExportDialog({
 
   useEffect(() => {
     getAppConfig().then((cfg) => {
-      setFormat(cfg.export_default_format as ExportFormat);
+      const fmt = cfg.export_default_format as ExportFormat;
+      setFormat(fmt);
+      if (cfg.export_default_folder) {
+        const folder = cfg.export_default_folder;
+        const sep = folder.includes("\\") ? "\\" : "/";
+        const safe = episodeName.replace(/[<>:"/\\|?*]/g, "_");
+        const ext = FORMAT_EXTENSIONS[fmt][0];
+        setOutputPath(
+          fmt === "chapters"
+            ? `${folder}${sep}${safe}`
+            : ext
+            ? `${folder}${sep}${safe}.${ext}`
+            : ""
+        );
+      }
     }).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState<{ value: number; stage: string } | null>(null);
   const [done, setDone] = useState<string | null>(null);

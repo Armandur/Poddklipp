@@ -375,6 +375,7 @@ export default function EpisodeDetail({
         onEditingDone={() => setEditingSegmentId(null)}
         segmentKinds={segmentKinds}
         confirmDelete={appConfig.confirm_delete_segment}
+        shortcuts={shortcuts}
       />
 
       {showExport && (

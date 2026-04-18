@@ -5,6 +5,7 @@ import {
   SEGMENT_KIND_COLORS,
 } from "../lib/format";
 import { SegmentKindsHook } from "../hooks/useSegmentKinds";
+import { ResolvedShortcuts, formatShortcutDisplay } from "../lib/shortcuts";
 
 interface SegmentTableProps {
   segments: Segment[];
@@ -16,6 +17,7 @@ interface SegmentTableProps {
   onEditingDone: () => void;
   segmentKinds: SegmentKindsHook;
   confirmDelete?: boolean;
+  shortcuts?: ResolvedShortcuts;
 }
 
 export default function SegmentTable({
@@ -28,6 +30,7 @@ export default function SegmentTable({
   onEditingDone,
   segmentKinds,
   confirmDelete = true,
+  shortcuts,
 }: SegmentTableProps) {
   const [error, setError] = useState<string | null>(null);
   const inputRefs = useRef<Map<number, HTMLInputElement>>(new Map());
@@ -75,7 +78,9 @@ export default function SegmentTable({
       <h3>
         Segment
         <span className="segment-table-hint">
-          ↑↓ = byt segment · Enter = spela · E = exkludera · N = byt namn · A = reklam · S = dela här
+          {shortcuts
+            ? `↑↓ = byt segment · Enter = spela · ${formatShortcutDisplay(shortcuts.toggle_excluded)} = exkludera · ${formatShortcutDisplay(shortcuts.rename_segment)} = byt namn · ${formatShortcutDisplay(shortcuts.mark_as_ad)} = reklam · ${formatShortcutDisplay(shortcuts.split_here)} = dela`
+            : "↑↓ = byt segment · Enter = spela · E = exkludera · N = byt namn · A = reklam · S = dela"}
         </span>
       </h3>
       {error && <div className="error">{error}</div>}

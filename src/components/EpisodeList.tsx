@@ -118,10 +118,12 @@ export default function EpisodeList({
                       <span className="kind-badge" style={{ color: "var(--danger)" }}>
                         Fel
                       </span>
+                    ) : ep.analyzed_at ? (
+                      <span className="kind-badge">Analyserad</span>
+                    ) : ep.waveform_peaks_path ? (
+                      <span className="kind-badge" style={{ color: "var(--accent)" }}>Vågform klar</span>
                     ) : (
-                      <span className="kind-badge">
-                        {ep.analyzed_at ? "Analyserad" : "Ej analyserad"}
-                      </span>
+                      <span className="kind-badge">Ej analyserad</span>
                     )}
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
