@@ -1,0 +1,46 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+
+# Python sidecar
+sidecar/.venv/
+sidecar/__pycache__/
+sidecar/**/__pycache__/
+sidecar/**/*.pyc
+sidecar/.ruff_cache/
+sidecar/dist/
+sidecar/build/
+*.spec
+
+# Tauri bundled resources (byggs av build-scripts)
+src-tauri/resources/sidecar/
+src-tauri/resources/ffmpeg/
+
+# App-data / cache
+*.db
+*.db-wal
+*.db-shm
+waveforms/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+
+# Python egg-info
+sidecar/*.egg-info/
+
+# Genererade TypeScript/Vite-artefakter
+tsconfig.tsbuildinfo
+tsconfig.node.tsbuildinfo
+vite.config.js
+vite.config.d.ts
