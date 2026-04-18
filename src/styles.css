@@ -313,6 +313,15 @@ tr:last-child td {
   min-height: 96px;
 }
 
+/* Minimap rendered by WaveSurfer immediately after .timeline-wave */
+.timeline-wave + div {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  border-radius: 0 0 4px 4px;
+  overflow: hidden;
+}
+
 .timeline-controls {
   display: flex;
   align-items: center;

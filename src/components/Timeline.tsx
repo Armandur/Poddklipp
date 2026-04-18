@@ -4,6 +4,7 @@ import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { Region } from "wavesurfer.js/dist/plugins/regions.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.js";
 import HoverPlugin from "wavesurfer.js/dist/plugins/hover.js";
+import MinimapPlugin from "wavesurfer.js/dist/plugins/minimap.js";
 import { Detection, Episode, Segment, WaveformPeaks, getWaveformPeaks, getWaveformPeaksHi } from "../lib/tauri";
 import {
   formatDuration,
@@ -75,8 +76,7 @@ export default function Timeline({
   const fitZoom = useCallback(() => {
     const container = containerRef.current;
     if (!container || durationSec <= 0) return 1;
-    const w = container.clientWidth;
-    return Math.max(1, w / durationSec);
+    return container.clientWidth / durationSec;
   }, [durationSec]);
 
   const applyZoom = useCallback(
@@ -135,6 +135,14 @@ export default function Timeline({
               labelBackground: "rgba(30,30,40,0.85)",
               labelColor: "#e6e6ea",
               labelSize: "11px",
+            }),
+            MinimapPlugin.create({
+              height: 28,
+              waveColor: "#3a3a4a",
+              progressColor: "#4a6a8a",
+              cursorColor: "transparent",
+              overlayColor: "rgba(107, 155, 209, 0.15)",
+              insertPosition: "afterend",
             }),
           ],
         });

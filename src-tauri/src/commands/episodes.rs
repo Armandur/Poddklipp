@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"];
 
@@ -71,6 +71,7 @@ fn is_audio_file(path: &Path) -> bool {
 
 #[tauri::command]
 pub fn add_episode(
+    app: AppHandle,
     state: State<AppState>,
     input: AddEpisodeInput,
 ) -> Result<Episode, String> {
@@ -92,7 +93,7 @@ pub fn add_episode(
 
     let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
 
-    // Om avsnittet redan finns, returnera det befintliga
+    // Om avsnittet redan finns, returnera det befintliga utan att starta nytt jobb.
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM episodes WHERE source_path = ?1",
@@ -123,6 +124,11 @@ pub fn add_episode(
     .map_err(|e| format!("DB-insert: {e}"))?;
 
     let id = conn.last_insert_rowid();
+
+    // Starta vågformsberäkning i bakgrunden direkt — låset måste släppas först.
+    drop(conn);
+    super::analysis::spawn_waveform_job(app, id);
+
     Ok(Episode {
         id,
         source_path: source_str,
@@ -199,6 +205,7 @@ pub fn scan_missing_files(conn: std::sync::MutexGuard<Connection>) {
 
 #[tauri::command]
 pub fn relink_episode(
+    app: AppHandle,
     state: State<AppState>,
     id: i64,
     new_path: String,
@@ -213,20 +220,26 @@ pub fn relink_episode(
 
     conn.execute(
         "UPDATE episodes
-         SET source_path = ?1, duration_ms = ?2, sample_rate = ?3, file_missing = 0
+         SET source_path = ?1, duration_ms = ?2, sample_rate = ?3,
+             file_missing = 0, waveform_peaks_path = NULL
          WHERE id = ?4",
         params![new_path, duration_ms, sample_rate, id],
     )
     .map_err(|e| e.to_string())?;
 
-    conn.query_row(
+    let ep = conn.query_row(
         "SELECT id, source_path, display_name, duration_ms, sample_rate,
                 waveform_peaks_path, analyzed_at, created_at, file_missing
          FROM episodes WHERE id = ?1",
         params![id],
         row_to_episode,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    drop(conn);
+    super::analysis::spawn_waveform_job(app, id);
+
+    Ok(ep)
 }
 
 #[tauri::command]

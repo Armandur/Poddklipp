@@ -41,23 +41,9 @@ pub struct JingleForSidecar {
 
 /// Beräkna bara vågform (lo + hi) utan jingel-analys. Returnerar direkt.
 /// Emittar `waveform-ready` / `waveform-error` med `episode_id`.
-#[tauri::command]
-pub fn compute_waveform(
-    app: AppHandle,
-    state: State<AppState>,
-    episode_id: i64,
-) -> Result<(), String> {
-    {
-        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
-        let _: i64 = conn
-            .query_row(
-                "SELECT id FROM episodes WHERE id = ?1",
-                params![episode_id],
-                |r| r.get(0),
-            )
-            .map_err(|e| format!("avsnitt hittades inte: {e}"))?;
-    }
-
+/// Spawna ett bakgrundsjobb som beräknar vågform för ett avsnitt.
+/// Kallas både från `compute_waveform`-kommandot och automatiskt från `add_episode`.
+pub fn spawn_waveform_job(app: AppHandle, episode_id: i64) {
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_clone.state::<AppState>();
@@ -131,7 +117,25 @@ pub fn compute_waveform(
             }
         }
     });
+}
 
+#[tauri::command]
+pub fn compute_waveform(
+    app: AppHandle,
+    state: State<AppState>,
+    episode_id: i64,
+) -> Result<(), String> {
+    {
+        let conn = state.db.lock().map_err(|_| "DB-lås".to_string())?;
+        let _: i64 = conn
+            .query_row(
+                "SELECT id FROM episodes WHERE id = ?1",
+                params![episode_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("avsnitt hittades inte: {e}"))?;
+    }
+    spawn_waveform_job(app, episode_id);
     Ok(())
 }
 
